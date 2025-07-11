@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from typing import List, Dict, Any, Optional
 import uuid
@@ -18,7 +18,16 @@ from ..services.ai_service import ai_service
 from ..models.generation import GenerationRequest, GenerationResponse, NaturalLanguageRequest, SchemaGenerationResponse
 
 router = APIRouter(prefix="/api/generation", tags=["generation"])
-security = HTTPBearer()
+
+# Optional authentication that allows guest access
+class OptionalHTTPBearer(HTTPBearer):
+    async def __call__(self, request: Request):
+        try:
+            return await super().__call__(request)
+        except HTTPException:
+            return None
+
+security = OptionalHTTPBearer(auto_error=False)
 
 # Initialize services
 redis_service = RedisService()
@@ -32,7 +41,7 @@ logger = logging.getLogger(__name__)
 @router.post("/schema-from-description", response_model=SchemaGenerationResponse)
 async def generate_schema_from_description(
     request: NaturalLanguageRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Generate schema from natural language description"""
     logger.info(f"🧠 Schema generation request received: domain={request.domain}, type={request.data_type}")
@@ -191,24 +200,33 @@ def _generate_sample_value(field_info: Dict[str, Any], field_name: str, index: i
 async def start_generation(
     request: GenerationRequest,
     background_tasks: BackgroundTasks,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Start synthetic data generation job"""
     logger.info(f"🚀 Generation start request: domain={request.domain}, type={request.data_type}")
     
     # Allow both authenticated users and guests
     user = None
-    try:
-        user = await verify_token(credentials.credentials)
-        logger.info(f"👤 User authenticated: {user.get('id', 'unknown')}")
-    except:
-        # Allow guest access - create temporary user
+    if credentials:
+        try:
+            user = await verify_token(credentials.credentials)
+            logger.info(f"👤 User authenticated: {user.get('id', 'unknown')}")
+        except:
+            # Allow guest access - create temporary user
+            user = {
+                "id": f"guest_{uuid.uuid4().hex[:8]}",
+                "email": "guest@datagenesis.ai",
+                "is_guest": True
+            }
+            logger.info(f"🔓 Guest user created: {user['id']}")
+    else:
+        # No credentials provided - create guest user
         user = {
             "id": f"guest_{uuid.uuid4().hex[:8]}",
             "email": "guest@datagenesis.ai",
             "is_guest": True
         }
-        logger.info(f"🔓 Guest user created: {user['id']}")
+        logger.info(f"🔓 Guest user created (no credentials): {user['id']}")
     
     # Generate unique job ID
     job_id = str(uuid.uuid4())
@@ -232,19 +250,22 @@ async def start_generation(
 @router.get("/status/{job_id}")
 async def get_generation_status(
     job_id: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Get generation job status"""
     logger.info(f"📊 Status request for job: {job_id}")
     
     # Allow both authenticated users and guests
-    try:
-        user = await verify_token(credentials.credentials)
-        logger.info(f"👤 User authenticated for status check")
-    except:
-        # Allow guest access
-        logger.info(f"🔓 Guest access for status check")
-        pass
+    if credentials:
+        try:
+            user = await verify_token(credentials.credentials)
+            logger.info(f"👤 User authenticated for status check")
+        except:
+            # Allow guest access
+            logger.info(f"🔓 Guest access for status check")
+            pass
+    else:
+        logger.info(f"🔓 Guest access for status check - no credentials")
     
     # Get job status from Redis
     job_data = await redis_service.get_cache(f"job:{job_id}")
@@ -266,19 +287,24 @@ async def get_generation_status(
 
 @router.get("/jobs")
 async def get_user_jobs(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Get all generation jobs for user"""
     logger.info("📋 User jobs request")
     
     # Allow both authenticated users and guests
-    try:
-        user = await verify_token(credentials.credentials)
-        user_id = user["id"]
-        logger.info(f"👤 Jobs requested for user: {user_id}")
-    except:
-        # For guests, return empty list or recent guest jobs
-        logger.info("🔓 Guest jobs request - returning empty list")
+    if credentials:
+        try:
+            user = await verify_token(credentials.credentials)
+            user_id = user["id"]
+            logger.info(f"👤 Jobs requested for user: {user_id}")
+        except:
+            # For guests, return empty list or recent guest jobs
+            logger.info("🔓 Guest jobs request - returning empty list")
+            return {"jobs": []}
+    else:
+        # For guests with no credentials, return empty list
+        logger.info("🔓 Guest jobs request (no credentials) - returning empty list")
         return {"jobs": []}
     
     # Get jobs from Supabase
@@ -290,10 +316,14 @@ async def get_user_jobs(
 @router.delete("/jobs/{job_id}")
 async def cancel_generation_job(
     job_id: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Cancel a running generation job"""
     logger.info(f"🛑 Cancel request for job: {job_id}")
+    
+    # Verify user has access (required for cancellation)
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required for job cancellation")
     
     user = await verify_token(credentials.credentials)
     
@@ -306,19 +336,22 @@ async def cancel_generation_job(
 @router.post("/analyze")
 async def analyze_data(
     data: Dict[str, Any],
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """Analyze uploaded data before generation"""
     logger.info("🔍 Data analysis request")
     
     # Allow both authenticated users and guests
-    try:
-        user = await verify_token(credentials.credentials)
-        logger.info(f"👤 Analysis request from user")
-    except:
-        # Allow guest access
-        logger.info("🔓 Guest analysis request")
-        pass
+    if credentials:
+        try:
+            user = await verify_token(credentials.credentials)
+            logger.info(f"👤 Analysis request from user")
+        except:
+            # Allow guest access
+            logger.info("🔓 Guest analysis request")
+            pass
+    else:
+        logger.info("🔓 Guest analysis request - no credentials")
     
     try:
         # Quick analysis using Gemini - NO FALLBACKS

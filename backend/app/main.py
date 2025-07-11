@@ -68,6 +68,9 @@ async def startup_event():
     await gemini_service.initialize()
     await ollama_service.initialize()
     await orchestrator.initialize()
+    # Initialize AI service fallback
+    from .services.ai_service import ai_service
+    await ai_service.initialize_fallback()
     
     # Log initialization status without consuming quota
     gemini_status = "initialized" if gemini_service.is_initialized else "not configured"

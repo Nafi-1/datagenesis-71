@@ -24,6 +24,20 @@ class AIService:
         self.api_key = None
         self.endpoint = None
         self.is_initialized = False
+        self._gemini_fallback = None
+        
+    async def initialize_fallback(self):
+        """Initialize Gemini as fallback service"""
+        try:
+            # Import here to avoid circular imports
+            from .gemini_service import GeminiService
+            self._gemini_fallback = GeminiService()
+            await self._gemini_fallback.initialize()
+            logger.info("✅ Gemini fallback service initialized")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ Could not initialize Gemini fallback: {str(e)}")
+            return False
         
     async def configure(self, provider: str, model: str, api_key: str, endpoint: str = None):
         """Configure the AI service with provider-specific settings"""
@@ -191,22 +205,34 @@ class AIService:
         domain: str = 'general',
         data_type: str = 'tabular'
     ) -> Dict[str, Any]:
-        """Generate schema from natural language description"""
-        if not self.is_initialized:
-            raise Exception("AI service not configured")
+        """Generate schema from natural language description with fallback"""
         
-        prompt = self._build_schema_prompt(description, domain, data_type)
+        # Try configured service first
+        if self.is_initialized:
+            try:
+                prompt = self._build_schema_prompt(description, domain, data_type)
+                
+                if self.current_provider == 'gemini':
+                    return await self._generate_schema_gemini(prompt)
+                elif self.current_provider == 'openai':
+                    return await self._generate_schema_openai(prompt)
+                elif self.current_provider == 'anthropic':
+                    return await self._generate_schema_anthropic(prompt)
+                elif self.current_provider == 'ollama':
+                    return await self._generate_schema_ollama(prompt)
+                else:
+                    raise Exception(f"Schema generation not supported for {self.current_provider}")
+            except Exception as e:
+                logger.warning(f"⚠️ Primary AI service failed, trying fallback: {str(e)}")
         
-        if self.current_provider == 'gemini':
-            return await self._generate_schema_gemini(prompt)
-        elif self.current_provider == 'openai':
-            return await self._generate_schema_openai(prompt)
-        elif self.current_provider == 'anthropic':
-            return await self._generate_schema_anthropic(prompt)
-        elif self.current_provider == 'ollama':
-            return await self._generate_schema_ollama(prompt)
+        # Fallback to Gemini if primary service not available or failed
+        if self._gemini_fallback:
+            logger.info("🔄 Using Gemini fallback for schema generation")
+            return await self._gemini_fallback.generate_schema_from_natural_language(
+                description, domain, data_type
+            )
         else:
-            raise Exception(f"Schema generation not supported for {self.current_provider}")
+            raise Exception("No AI service available and fallback not initialized")
     
     def _build_schema_prompt(self, description: str, domain: str, data_type: str) -> str:
         """Build schema generation prompt"""
@@ -361,29 +387,37 @@ class AIService:
         config: Dict[str, Any],
         description: str = ""
     ) -> List[Dict[str, Any]]:
-        """Generate high-quality synthetic data using the configured AI provider"""
-        if not self.is_initialized:
-            raise Exception("AI service not configured")
+        """Generate high-quality synthetic data with fallback"""
         
         # Cap row count at 100 for quota management
         config['rowCount'] = min(config.get('rowCount', 100), 100)
         
-        prompt = self._build_data_generation_prompt(schema, config, description)
+        # Try configured service first
+        if self.is_initialized:
+            try:
+                prompt = self._build_data_generation_prompt(schema, config, description)
+                
+                if self.current_provider == 'gemini':
+                    return await self._generate_data_gemini(prompt, config)
+                elif self.current_provider == 'openai':
+                    return await self._generate_data_openai(prompt, config)
+                elif self.current_provider == 'anthropic':
+                    return await self._generate_data_anthropic(prompt, config)
+                elif self.current_provider == 'ollama':
+                    return await self._generate_data_ollama(prompt, config)
+                else:
+                    raise Exception(f"Data generation not supported for {self.current_provider}")
+            except Exception as e:
+                logger.warning(f"⚠️ Primary AI service failed, trying fallback: {str(e)}")
         
-        try:
-            if self.current_provider == 'gemini':
-                return await self._generate_data_gemini(prompt, config)
-            elif self.current_provider == 'openai':
-                return await self._generate_data_openai(prompt, config)
-            elif self.current_provider == 'anthropic':
-                return await self._generate_data_anthropic(prompt, config)
-            elif self.current_provider == 'ollama':
-                return await self._generate_data_ollama(prompt, config)
-            else:
-                raise Exception(f"Data generation not supported for {self.current_provider}")
-        except Exception as e:
-            logger.error(f"❌ AI data generation failed: {str(e)}")
-            raise e
+        # Fallback to Gemini if primary service not available or failed
+        if self._gemini_fallback:
+            logger.info("🔄 Using Gemini fallback for data generation")
+            return await self._gemini_fallback.generate_synthetic_data_advanced(
+                schema, config, description
+            )
+        else:
+            raise Exception("No AI service available and fallback not initialized")
 
     def _build_data_generation_prompt(self, schema: Dict[str, Any], config: Dict[str, Any], description: str) -> str:
         """Build comprehensive data generation prompt"""

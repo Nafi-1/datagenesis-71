@@ -19,15 +19,16 @@ class OllamaService:
         self.base_url = base_url
         self.model_name = "llama3.2:3b"  # Start with smaller model for memory constraints
         self.is_initialized = False
-        self.client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))  # Shorter timeout for responsiveness
+        # Much longer timeout for initial model loading and inference
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0))
         
     def configure_model(self, model_name: str, base_url: str = None):
         """Configure Ollama model and endpoint"""
         self.model_name = model_name
         if base_url:
             self.base_url = base_url
-            # Update client with new base URL
-            self.client = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+            # Update client with longer timeout for model loading
+            self.client = httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0))
         # Re-initialize with new settings
         logger.info(f"🔧 Ollama configured: {model_name} at {self.base_url}")
         return True
@@ -152,7 +153,7 @@ class OllamaService:
             response = await self.client.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
-                timeout=httpx.Timeout(60.0)  # Reasonable timeout for small models
+                timeout=httpx.Timeout(180.0)  # Extended timeout for model loading/inference
             )
             
             logger.info(f"📡 Response status: {response.status_code}")
