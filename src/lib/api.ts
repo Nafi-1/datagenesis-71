@@ -5,7 +5,7 @@ const API_BASE_URL = '/api';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 120000, // Increased to 2 minutes for AI processing
 });
 
 export class ApiService {
@@ -78,8 +78,10 @@ export class ApiService {
     sourceData?: any[];
   }): Promise<any> {
     try {
-      // Always use generate-local for immediate generation
-      const response = await api.post('/generation/generate-local', data);
+      // Use generate-local with extended timeout for AI processing
+      const response = await api.post('/generation/generate-local', data, {
+        timeout: 180000, // 3 minutes for complex AI generation
+      });
       return response.data;
     } catch (error) {
       console.error('Data generation failed:', error);

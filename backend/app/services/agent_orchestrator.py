@@ -18,6 +18,10 @@ class AgentOrchestrator:
         self.ollama_service = ollama_service or OllamaService()
         self.redis_service = redis_service or RedisService()
         self.vector_service = vector_service or VectorService()
+        
+        # Import AI service to access configured provider
+        from .ai_service import ai_service
+        self.ai_service = ai_service
         self.agents = {
             "privacy_agent": PrivacyAgent(),
             "quality_agent": QualityAgent(), 
@@ -31,16 +35,38 @@ class AgentOrchestrator:
         """Initialize the orchestrator and all agents"""
         logger.info("🤖 Initializing Multi-Agent Orchestrator...")
         
-        # Initialize services  
-        await self.gemini_service.initialize()
-        await self.ollama_service.initialize()
-        await self.redis_service.initialize()
-        await self.vector_service.initialize()
+        # Initialize services gracefully with error handling
+        try:
+            await self.gemini_service.initialize()
+            logger.info("   ✅ Gemini service initialized")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Gemini service failed to initialize: {str(e)}")
+            
+        try:
+            await self.ollama_service.initialize()
+            logger.info("   ✅ Ollama service initialized")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Ollama service failed to initialize: {str(e)}")
+            
+        try:
+            await self.redis_service.initialize()
+            logger.info("   ✅ Redis service initialized")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Redis service failed to initialize: {str(e)}")
+            
+        try:
+            await self.vector_service.initialize()
+            logger.info("   ✅ Vector service initialized")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Vector service failed to initialize: {str(e)}")
         
-        # Initialize all agents
+        # Initialize all agents with graceful error handling
         for agent_name, agent in self.agents.items():
-            await agent.initialize(self.gemini_service)
-            logger.info(f"   ✅ {agent_name} initialized")
+            try:
+                await agent.initialize(self.gemini_service)
+                logger.info(f"   ✅ {agent_name} initialized")
+            except Exception as e:
+                logger.warning(f"   ⚠️ {agent_name} failed to initialize: {str(e)}")
         
         self.is_initialized = True
         logger.info("🎯 Multi-Agent Orchestrator ready!")
@@ -233,9 +259,25 @@ class AgentOrchestrator:
         
         logger.info("🎨 Generating synthetic data with multi-agent context...")
         
-        # Try Gemini first, then Ollama, then fallback
+        # Use configured AI service first, then fallback hierarchy
+        try:
+            # Use the configured AI service (could be Gemini, Ollama, etc.)
+            if self.ai_service.is_initialized:
+                logger.info(f"🤖 Using configured AI service: {self.ai_service.current_provider}")
+                synthetic_data = await self.ai_service.generate_synthetic_data_advanced(
+                    schema=context['schema'],
+                    config=context['config'],
+                    description=context['description']
+                )
+                logger.info(f"✅ Generated {len(synthetic_data)} records using {self.ai_service.current_provider}")
+                return synthetic_data
+        except Exception as e:
+            logger.warning(f"⚠️ Configured AI service failed: {str(e)}")
+            
+        # Fallback to Gemini
         try:
             if self.gemini_service.is_initialized:
+                logger.info("🤖 Falling back to Gemini for data generation...")
                 synthetic_data = await self.gemini_service.generate_synthetic_data(
                     schema=context['schema'],
                     config=context['config'],
@@ -247,7 +289,7 @@ class AgentOrchestrator:
         except Exception as e:
             logger.warning(f"⚠️ Gemini generation failed: {str(e)}")
             
-        # Try Ollama as fallback
+        # Try Ollama as final AI fallback
         try:
             if self.ollama_service.is_initialized:
                 logger.info("🦙 Falling back to Ollama for data generation...")
@@ -374,7 +416,7 @@ class PrivacyAgent(BaseAgent):
             if data and isinstance(data, list):
                 safe_data = data[:3] if len(data) > 3 else data.copy()
             
-            # Use Gemini for privacy assessment if available
+            # Use any available AI service for privacy assessment
             if self.gemini_service and self.gemini_service.is_initialized:
                 privacy_assessment = await self.gemini_service.assess_privacy_risks(safe_data, config)
             else:

@@ -171,28 +171,22 @@ async def test_ai_connection():
         # For Ollama, use the configured AI service directly
         if ai_service.current_provider == 'ollama':
             try:
-                # First test basic health check
+                # For Ollama, just do a health check - no credentials needed
                 health_result = await ai_service.health_check()
                 
                 if health_result.get("status") == "online":
-                    # Try a simple schema generation test to verify model works
-                    test_result = await ai_service.generate_schema_from_natural_language(
-                        description="A simple user profile with name and email",
-                        domain="general",
-                        data_type="tabular"
-                    )
-                    
+                    # Skip intensive schema generation test for Ollama to avoid timeouts
                     return {
                         "status": "success",
-                        "message": "Ollama connection and model test successful",
+                        "message": "Ollama connection successful",
                         "provider": ai_service.current_provider,
                         "model": ai_service.current_model,
                         "test_result": {
                             "health_status": "online",
-                            "fields_generated": len(test_result.get('schema', {})),
-                            "detected_domain": test_result.get('detected_domain', 'unknown')
+                            "note": "Basic health check passed"
                         }
                     }
+                    
                 else:
                     raise Exception(f"Ollama service not responding: {health_result.get('message', 'Unknown error')}")
                     
@@ -201,7 +195,7 @@ async def test_ai_connection():
                 if "memory" in error_msg.lower():
                     raise Exception(f"Model requires too much memory. Try smaller models like llama3.2:1b, llama3.2:3b, or phi3:3.8b")
                 else:
-                    raise Exception(f"Ollama test failed: {error_msg}")
+                    raise Exception(f"Ollama connection failed: {error_msg}")
         else:
             # For other providers, use schema generation test
             test_result = await ai_service.generate_schema_from_natural_language(

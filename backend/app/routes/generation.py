@@ -69,18 +69,26 @@ async def generate_schema_from_description(
         
         logger.info(f"✅ Request validated successfully")
         
-        # Generate schema using configured AI service first, then fallback to Gemini
+        # Generate schema using AI service with proper fallback
         logger.info("🔄 Calling AI service for schema generation...")
         try:
             if ai_service.is_initialized:
                 logger.info(f"🤖 Using configured AI service: {ai_service.current_provider}")
-                schema_result = await ai_service.generate_schema_from_natural_language(
-                    request.description,
-                    request.domain,
-                    request.data_type
-                )
+                try:
+                    schema_result = await ai_service.generate_schema_from_natural_language(
+                        request.description,
+                        request.domain,
+                        request.data_type
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Primary AI service failed: {str(e)}, falling back to Gemini")
+                    schema_result = await gemini_service.generate_schema_from_natural_language(
+                        request.description,
+                        request.domain,
+                        request.data_type
+                    )
             else:
-                logger.info("🤖 Using Gemini service as fallback")
+                logger.info("🤖 Using Gemini service as default")
                 schema_result = await gemini_service.generate_schema_from_natural_language(
                     request.description,
                     request.domain,
@@ -401,40 +409,26 @@ async def generate_local_data(
     logger.info(f"📊 Generation config: {len(schema)} fields, {config.get('rowCount', 0)} rows requested")
     
     try:
-        # If AI service is configured, use it directly for faster generation
-        if ai_service.is_initialized:
-            logger.info(f"🎯 Using configured AI service: {ai_service.current_provider}")
-            result = await ai_service.generate_synthetic_data_advanced(
-                schema=schema,
-                config=config,
-                description=description
-            )
-            
-            return {
-                "data": result,
-                "metadata": {
-                    "generation_time": datetime.utcnow().isoformat(),
-                    "ai_provider": ai_service.current_provider,
-                    "generation_method": "ai_real_time"
-                },
-                "message": f"Generated using {ai_service.current_provider}",
-                "records_generated": len(result),
-                "provider": ai_service.current_provider,
-                "model": ai_service.current_model
-            }
-        else:
-            # Fallback to orchestrator with Ollama
-            logger.info("🔄 Using agent orchestrator as fallback")
-            job_id = str(uuid.uuid4())
-            result = await orchestrator.orchestrate_generation(
-                job_id=job_id,
-                source_data=source_data,
-                schema=schema,
-                config=config,
-                description=description,
-                websocket_manager=None
-            )
-            return result
+        # Use agent orchestrator for best results with proper fallback
+        logger.info("🤖 Using multi-agent orchestrator for premium data generation")
+        job_id = str(uuid.uuid4())
+        
+        # Initialize orchestrator 
+        orchestrator = AgentOrchestrator()
+        await orchestrator.initialize()
+        
+        # Use orchestrator which handles AI service fallbacks internally
+        result = await orchestrator.orchestrate_generation(
+            job_id=job_id,
+            source_data=source_data,
+            schema=schema,
+            config=config,
+            description=description,
+            websocket_manager=None  # WebSocket not available in sync generation
+        )
+        
+        logger.info(f"✅ Multi-agent generation completed: {len(result.get('data', []))} records")
+        return result
         
     except Exception as e:
         logger.error(f"Generation failed: {str(e)}")
