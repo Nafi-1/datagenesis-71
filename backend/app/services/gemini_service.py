@@ -33,9 +33,9 @@ class GeminiService:
             
         try:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel("gemini-2.0-flash-exp")
+            self.model = genai.GenerativeModel("gemini-2.0-flash-lite")
             self.is_initialized = True
-            logger.info("✅ Gemini 2.0 Flash initialized successfully")
+            logger.info("✅ Gemini 2.0 Flash-Lite initialized successfully")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize Gemini: {str(e)}")
@@ -63,9 +63,9 @@ class GeminiService:
             
             return {
                 "status": "online",
-                "message": "Gemini 2.0 Flash operational",
+                "message": "Gemini 2.0 Flash-Lite operational",
                 "quota_available": True,
-                "model": "gemini-2.0-flash-exp"
+                "model": "gemini-2.0-flash-lite"
             }
             
         except Exception as e:
@@ -184,7 +184,7 @@ class GeminiService:
             )
             
             text = response.text.strip()
-            logger.info(f"✅ Gemini 2.0 Flash responded with {len(text)} characters")
+            logger.info(f"✅ Gemini 2.0 Flash-Lite responded with {len(text)} characters")
             
             # Clean and parse JSON
             if '```json' in text:

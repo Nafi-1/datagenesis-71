@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 # Import services and routes
-from .routes import generation, agents, analytics, auth, datasets, ai_config
+from .routes import generation, agents, analytics, auth, datasets, ai_config, quota
 from .services.gemini_service import GeminiService
 from .services.ollama_service import OllamaService
 from .services.agent_orchestrator import AgentOrchestrator
@@ -105,6 +105,7 @@ app.include_router(analytics.router)
 app.include_router(auth.router)
 app.include_router(datasets.router)
 app.include_router(ai_config.router)
+app.include_router(quota.router)
 
 @app.get("/")
 async def root():

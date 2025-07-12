@@ -18,32 +18,44 @@ const ModelContext = createContext<ModelContextType | undefined>(undefined);
 
 const defaultModels = {
   gemini: [
+    'gemini-2.0-flash-lite',
     'gemini-1.5-flash',
     'gemini-1.5-pro',
     'gemini-2.0-flash-exp',
     'gemini-1.0-pro'
   ],
   openai: [
-    'gpt-4',
-    'gpt-4-turbo',
-    'gpt-3.5-turbo',
+    'gpt-4.1-2025-04-14',
+    'o3-2025-04-16',
+    'o4-mini-2025-04-16',
     'gpt-4o',
-    'gpt-4o-mini'
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-3.5-turbo'
   ],
   anthropic: [
+    'claude-opus-4-20250514',
+    'claude-sonnet-4-20250514',
+    'claude-3-5-haiku-20241022',
     'claude-3-5-sonnet-20241022',
+    'claude-3-opus-20240229',
     'claude-3-sonnet-20240229',
-    'claude-3-haiku-20240307',
-    'claude-3-opus-20240229'
+    'claude-3-haiku-20240307'
   ],
   ollama: [
+    'phi3:mini',
+    'phi3:3.8b',
+    'llama3.2:1b',
+    'llama3.2:3b',
     'llama3:8b',
     'llama3:70b',
-    'llama3.2:3b',
     'llama2:7b',
     'mistral:7b',
+    'deepseek-coder:6.7b',
+    'gemma2:2b',
+    'gemma2:9b',
     'codellama:7b',
-    'phi3:3.8b',
+    'qwen2.5:7b',
     'custom'
   ]
 };

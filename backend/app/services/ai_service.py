@@ -12,6 +12,7 @@ from datetime import datetime
 import aiohttp
 import google.generativeai as genai
 from ..config import settings
+from .quota_manager import quota_manager
 import random
 import uuid
 
@@ -25,6 +26,19 @@ class AIService:
         self.endpoint = None
         self.is_initialized = False
         self._gemini_fallback = None
+        
+    async def initialize(self):
+        """Initialize AI service with quota management and fallback services"""
+        logger.info("🚀 Initializing AI Service...")
+        
+        # Initialize quota manager
+        await quota_manager.initialize()
+        
+        # Initialize fallback services
+        await self.initialize_fallback()
+        
+        logger.info("✅ AI Service initialized with quota management")
+        return True
         
     async def initialize_fallback(self):
         """Initialize Gemini as fallback service"""
@@ -558,6 +572,115 @@ class AIService:
             logger.error(f"Failed to parse data response: {str(e)}")
             logger.error(f"Response text: {text[:500]}...")
             raise Exception("Invalid JSON response from AI model")
+
+    async def generate_synthetic_data_with_quota(
+        self,
+        schema: Dict[str, Any],
+        config: Dict[str, Any],
+        description: str = "",
+        user_id: str = "guest"
+    ) -> List[Dict[str, Any]]:
+        """Generate synthetic data with quota management and intelligent fallback"""
+        
+        if not schema:
+            raise Exception("Schema is required for data generation")
+            
+        # Cap row count for quota management
+        row_count = min(config.get('rowCount', 100), 100)
+        config['rowCount'] = row_count
+        
+        # Check quota before proceeding if using tracked provider
+        if self.is_initialized and self.current_provider:
+            quota_check = await quota_manager.check_quota(self.current_provider, user_id, "dataset")
+            if not quota_check["allowed"]:
+                # If quota exceeded, try fallback to unlimited provider (Ollama)
+                logger.warning(f"⚠️ Quota exceeded for {self.current_provider}: {quota_check['message']}")
+                
+                # Try Ollama as unlimited fallback
+                if self.current_provider != "ollama":
+                    try:
+                        if hasattr(self, '_ollama_service') and self._ollama_service.is_initialized:
+                            logger.info("🔄 Falling back to Ollama (unlimited) due to quota limits")
+                            data = await self._ollama_service.generate_synthetic_data(schema, config, description, None)
+                            if data and len(data) > 0:
+                                logger.info(f"✅ Quota fallback successful: Generated {len(data)} records using Ollama")
+                                return data
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ollama fallback failed: {str(e)}")
+                
+                raise Exception(f"Quota limit exceeded: {quota_check['message']}")
+                
+        logger.info(f"🎯 Generating {row_count} rows using {self.current_provider}")
+        
+        # Try primary configured service first
+        if self.is_initialized and self.current_provider:
+            try:
+                data = await self.generate_synthetic_data_advanced(schema, config, description)
+                if data and len(data) > 0:
+                    # Consume quota on successful generation
+                    await quota_manager.consume_quota(self.current_provider, user_id, "dataset")
+                    logger.info(f"✅ Successfully generated {len(data)} records using {self.current_provider}")
+                    return data
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "quota" in error_msg or "rate" in error_msg or "429" in error_msg:
+                    logger.warning(f"⚠️ Quota exceeded for {self.current_provider}: {str(e)}")
+                    
+                    # Try Ollama as unlimited fallback
+                    if self.current_provider != "ollama":
+                        try:
+                            if hasattr(self, '_ollama_service') and self._ollama_service.is_initialized:
+                                logger.info("🔄 Falling back to Ollama due to quota exhaustion")
+                                data = await self._ollama_service.generate_synthetic_data(schema, config, description, None)
+                                if data and len(data) > 0:
+                                    logger.info(f"✅ Quota exhaustion fallback successful: Generated {len(data)} records using Ollama")
+                                    return data
+                        except Exception as fallback_e:
+                            logger.warning(f"⚠️ Ollama fallback failed: {str(fallback_e)}")
+                    
+                    raise Exception(f"Quota exceeded and fallback failed: {str(e)}")
+                else:
+                    logger.warning(f"⚠️ Primary service ({self.current_provider}) failed: {str(e)}")
+                
+        # Try intelligent fallback chain
+        fallback_providers = []
+        
+        # Build fallback chain based on current provider
+        if self.current_provider != "gemini" and self._gemini_fallback:
+            fallback_providers.append(("gemini", self._gemini_fallback))
+        
+        if self.current_provider != "ollama" and hasattr(self, '_ollama_service'):
+            fallback_providers.append(("ollama", self._ollama_service))
+            
+        for provider_name, service in fallback_providers:
+            try:
+                # Check quota for tracked providers
+                if provider_name != "ollama":
+                    quota_check = await quota_manager.check_quota(provider_name, user_id, "dataset")
+                    if not quota_check["allowed"]:
+                        logger.warning(f"⚠️ Skipping {provider_name} fallback due to quota limits")
+                        continue
+                
+                logger.info(f"🔄 Falling back to {provider_name} service")
+                
+                if provider_name == "gemini":
+                    data = await service.generate_synthetic_data(schema, config, description, None)
+                elif provider_name == "ollama":
+                    data = await service.generate_synthetic_data(schema, config, description, None)
+                
+                if data and len(data) > 0:
+                    # Consume quota for tracked providers
+                    if provider_name != "ollama":
+                        await quota_manager.consume_quota(provider_name, user_id, "dataset")
+                    logger.info(f"✅ Fallback successful: Generated {len(data)} records using {provider_name}")
+                    return data
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ {provider_name} fallback failed: {str(e)}")
+                continue
+                
+        raise Exception("All AI services failed to generate data. Please check your configuration and try again.")
 
 # Global AI service instance
 ai_service = AIService()
